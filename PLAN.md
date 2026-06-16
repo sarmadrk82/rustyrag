@@ -51,36 +51,48 @@ RustyRAG is a **RAG ETL framework**, not a one-off app:
 
 ---
 
-## What is built today (Phases 0–2) ✅
+## What is built today (Phases 0–2, 6 partial) ✅
 
 ### Phase 0 — Scaffold
 - Cargo workspace with crates: `core`, `config`, `adapters`, `etl`, `api`, `cli`
 - YAML load + validate + `${ENV}` substitution
 - Adapter traits (`Source`, `Parser`, `Chunker`, `Embedder`, `VectorStore`, `Llm`)
+- Adapter registry: `rustyrag adapters list`
 
 ### Phase 1 — ETL
-- **Source:** filesystem (`./data/docs`, glob `**/*`, filters `.md` / `.txt`)
-- **Parse:** auto (plain text / markdown as-is)
-- **Chunk:** recursive (`text-splitter`, size 512, overlap 64)
-- **Embed:** OpenAI (`text-embedding-3-small`)
-- **Store:** Qdrant only (cosine, one collection per pipeline) — other backends planned (see Vector stores)
+- **Source:** filesystem (`./data/docs`, glob `**/*`; `.md`, `.txt`, `.html`, `.htm`, `.pdf`)
+- **Parse:** auto — plain text / markdown as-is; PDF text extraction; HTML → text
+- **Chunk:** recursive (`text-splitter`) or **semantic** (embed-based topic boundaries)
+- **Embed:** OpenAI or **Ollama**
+- **Store:** Qdrant only (cosine, one collection per pipeline) — pgVector, OpenSearch, S3 Vectors planned (see Vector stores)
 - **Idempotency:** content hash in `.rustyrag/<pipeline-name>.json`
-- **CLI:** `validate`, `etl run`, `etl dry-run` (dry-run = no OpenAI/Qdrant writes)
+- **Safety:** max file size, max chunks per document, embed cost estimate in dry-run
+- **Checkpoint:** per-document state save for crash resume
+- **CLI:** `validate`, `etl run`, `etl dry-run`
 
 ### Phase 2 — Query API
 - **Endpoints:**
   - `GET /healthz`
-  - `POST /v1/retrieve` — embed query + search Qdrant (no LLM chat)
+  - `POST /v1/retrieve` — embed query + vector search (no LLM)
   - `POST /v1/query` — retrieve + LLM answer + source citations
+  - `POST /v1/query/stream` — same as query, streamed via SSE
+- **Retrieval:** semantic or **hybrid** (dense + BM25 rerank)
+- **Generation:** OpenAI or **Ollama**
 - **Config:** `configs/rag/default.yaml`
 - **CLI:** `rustyrag serve --bind 0.0.0.0:8081`
+
+### Phase 6 — Advanced adapters (partial) ✅
+- Semantic chunking, hybrid search, Ollama embed/LLM
+- PDF + HTML ingest via `parse.adapter: auto`
+- Streaming query, file-size/chunk guards, checkpoint/resume, dry-run cost estimate
+- **Not yet:** S3 source, Confluence, dedicated reranker, SQLite checkpoint store
 
 ### Demo flow (works now)
 
 ```bash
 cd ~/coding/rustyrag
 cp .env.example .env          # add OPENAI_API_KEY, QDRANT_URL
-docker compose up -d          # starts Qdrant only — not RustyRAG itself
+docker compose up -d          # starts Qdrant in Docker — not RustyRAG itself
 
 cargo run -p rustyrag-cli -- etl dry-run configs/pipelines/docs-index.yaml
 cargo run -p rustyrag-cli -- etl run configs/pipelines/docs-index.yaml
@@ -90,7 +102,14 @@ curl http://localhost:8081/healthz
 curl -X POST http://localhost:8081/v1/query \
   -H 'Content-Type: application/json' \
   -d '{"query":"How do I run the pipeline?"}'
+
+# Stream tokens (SSE)
+curl -N -X POST http://localhost:8081/v1/query/stream \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"How do I run the pipeline?"}'
 ```
+
+**Index a PDF:** drop `.pdf` files under `data/docs/` (or your pipeline `source.path`), run `etl run` — text is extracted at ingest, not at query time.
 
 ---
 

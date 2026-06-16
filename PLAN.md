@@ -51,13 +51,14 @@ RustyRAG is a **RAG ETL framework**, not a one-off app:
 
 ---
 
-## What is built today (Phases 0–2, 6 partial) ✅
+## What is built so far ✅
+
+Summary by phase. Phases are **not strictly sequential in delivery** — e.g. Phase 6 adapter work landed before Phase 3 GUI foundation was finished.
 
 ### Phase 0 — Scaffold
 - Cargo workspace with crates: `core`, `config`, `adapters`, `etl`, `api`, `cli`
 - YAML load + validate + `${ENV}` substitution
 - Adapter traits (`Source`, `Parser`, `Chunker`, `Embedder`, `VectorStore`, `Llm`)
-- Adapter registry: `rustyrag adapters list`
 
 ### Phase 1 — ETL
 - **Source:** filesystem (`./data/docs`, glob `**/*`; `.md`, `.txt`, `.html`, `.htm`, `.pdf`)
@@ -81,10 +82,24 @@ RustyRAG is a **RAG ETL framework**, not a one-off app:
 - **Config:** `configs/rag/default.yaml`
 - **CLI:** `rustyrag serve --bind 0.0.0.0:8081`
 
+### Phase 3 — Config contract for GUI (partial) ⏳
+**Not finished.** Some pieces were added early (during Phase 6) to support adapter discovery:
+
+| Item | Status |
+|---|---|
+| `rustyrag validate` | ✅ Built (Phase 0) |
+| `rustyrag adapters list` | ✅ Built — JSON list of name/label/description per stage |
+| Adapter registry in code | ✅ Partial — no per-adapter **fields, types, defaults** yet |
+| JSON Schema for pipeline + RAG YAML | ❌ Not built |
+| `rustyrag config export` | ❌ Not built |
+
+**Exit criteria not met:** a GUI still cannot auto-generate full valid YAML from schema + field metadata alone.
+
 ### Phase 6 — Advanced adapters (partial) ✅
 - Semantic chunking, hybrid search, Ollama embed/LLM
 - PDF + HTML ingest via `parse.adapter: auto`
 - Streaming query, file-size/chunk guards, checkpoint/resume, dry-run cost estimate
+- Basic adapter registry (overlaps with Phase 3 — needs field schemas to complete Phase 3)
 - **Not yet:** S3 source, Confluence, dedicated reranker, SQLite checkpoint store
 
 ### Demo flow (works now)
@@ -148,16 +163,17 @@ rustyrag/
 ├── .env.example
 ├── configs/
 │   ├── pipelines/docs-index.yaml
+│   ├── pipelines/docs-index-semantic.yaml
 │   └── rag/default.yaml
 ├── data/docs/                 # sample documents
 └── crates/
     ├── rustyrag-core          # types, traits, errors
-    ├── rustyrag-config        # YAML load, validate, .env
-    ├── rustyrag-adapters      # filesystem, openai, qdrant, llm
+    ├── rustyrag-config        # YAML load, validate, env, adapter registry
+    ├── rustyrag-adapters      # filesystem, openai, ollama, qdrant, semantic chunker, bm25
     ├── rustyrag-etl           # pipeline runner, idempotency state
     ├── rustyrag-api           # axum HTTP server
-    ├── rustyrag-cli           # binary: validate, etl, serve
-    └── rustyrag-gui           # (Phase 4) TBD
+    ├── rustyrag-cli           # binary: validate, etl, serve, adapters
+    └── rustyrag-gui           # (Phase 4) React UI + Axum config/ops API
 ```
 
 ### Adapter pattern
@@ -256,9 +272,10 @@ parse:
   adapter: auto
 
 chunk:
-  adapter: recursive       # future: semantic
+  adapter: recursive       # or: semantic
   chunk_size: 512
   chunk_overlap: 64
+  # similarity_threshold: 0.5   # semantic only
 
 embed:
   adapter: openai
@@ -274,6 +291,8 @@ store:
 index:
   idempotency_key: content_hash
   batch_upsert_size: 100
+  # max_chunks_per_document: 10000   # optional, has default
+  # checkpoint: true                 # optional, default true
 ```
 
 ### RAG — `configs/rag/default.yaml`
@@ -287,7 +306,9 @@ retrieval:
   store_url: "${QDRANT_URL}"  # qdrant-specific today; store_adapter planned for multi-backend
   embed_model: text-embedding-3-small
   top_k: 5
-  search_mode: semantic     # future: hybrid
+  search_mode: semantic     # or: hybrid
+  # hybrid_dense_weight: 0.7
+  # embed_adapter: openai     # optional, default openai
   rerank:
     enabled: false
     adapter: none
@@ -311,7 +332,21 @@ context:
 |---|---|---|
 | **recursive** | ✅ Built | Split by size (~512 chars), break at sentence/paragraph boundaries. Fast, no extra API cost. |
 | **semantic** | ✅ Built | Embed sentences, split where topic shifts. Better coherence; costs embed calls at ingest. |
-| **hybrid search** | ✅ Built | Dense + BM25 reranking via `retrieval.search_mode: hybrid`. |
+
+Configured via `chunk.adapter` in the **pipeline** config (ETL ingest stage).
+
+---
+
+## Retrieval / search modes (query-time)
+
+Separate from chunking — configured via `retrieval.search_mode` in the **RAG** config:
+
+| Mode | Status | Description |
+|---|---|---|
+| **semantic** | ✅ Built | Dense vector similarity only (embed query → search Qdrant). |
+| **hybrid** | ✅ Built | Fetch extra dense results, then rerank with BM25 keyword scoring (`hybrid_dense_weight` blends both). |
+
+There is no "hybrid chunking" adapter — hybrid applies only when answering queries, not when splitting documents at ingest.
 
 ---
 
@@ -329,25 +364,29 @@ context:
 
 ## Lessons from hands-on use
 
-- Run **`etl dry-run`** before **`etl run`** — avoids surprise OpenAI bills
-- Need **max file size / max chunks** guard (accidental multi-GB file lesson)
+- Run **`etl dry-run`** before **`etl run`** — avoids surprise OpenAI bills; prints embed cost estimate
+- **File size / max chunks guards** are built — tune via `source.max_file_size_bytes` and `index.max_chunks_per_document`
 - Always run CLI from **project root** (`~/coding/rustyrag`)
 - **`lsof -iTCP:8080`** to see port conflicts; Zookeeper used 8080 on this machine
 - Inspect Qdrant: `curl http://localhost:6333/collections/docs` or dashboard at `http://localhost:6333/dashboard`
-- **Vector store is Qdrant-only in code** — pgVector / OpenSearch / S3 Vectors require new `VectorStoreAdapter` impls (see roadmap)
+- **Vector store is Qdrant-only in code** — pgVector / OpenSearch / S3 Vectors require Phase 7 adapters
+- **Semantic chunking calls embed API even in dry-run** — expected; use `recursive` for zero-cost dry-runs
 
 ---
 
 ## Roadmap (what’s next)
 
-### Phase 3 — Config contract for GUI ⏳
+### Phase 3 — Config contract for GUI ⏳ (partial)
 
 **Goal:** GUI and engine share one source of truth.
 
-- JSON Schema (or equivalent) for pipeline + RAG configs
-- **Adapter registry as data** — name, label, fields, types, defaults
-- New CLI: `rustyrag adapters list`, `rustyrag config export`
-- Keep `rustyrag validate` as the gate
+| Item | Status |
+|---|---|
+| `rustyrag validate` | ✅ Done |
+| `rustyrag adapters list` | ✅ Done (name, label, description) |
+| Adapter registry with **fields, types, defaults** | ❌ Not done |
+| JSON Schema for pipeline + RAG configs | ❌ Not done |
+| `rustyrag config export` | ❌ Not done |
 
 **Exit criteria:** A tool/GUI can list adapters and emit valid YAML without hand-editing.
 
@@ -357,11 +396,53 @@ context:
 
 **Goal:** Build pipelines visually; as flexible as YAML.
 
-- Web UI in browser (React + Rust API, or Rust-served static — TBD)
-- Screens: **Pipeline wizard** + **RAG config**
-- Dropdowns from adapter registry; **Advanced** panel for power users
-- Actions: validate, dry-run, export/save YAML, optional trigger ETL
-- Users never required to edit raw YAML (but can)
+**One app, not two.** RustyRAG Studio is a single browser UI with three areas:
+
+| Area | Purpose | Output / action |
+|---|---|---|
+| **Pipeline wizard** | Source → parse → chunk → embed → store | `configs/pipelines/*.yaml` |
+| **RAG config editor** | Retrieval + generation + context | `configs/rag/*.yaml` |
+| **Ops + playground** | Validate, dry-run, run ETL, chat test | CLI actions + `/v1/query/stream` |
+
+The GUI **authors YAML** and **triggers** ETL — it does not replace batch workers (Phase 5) or the query API (Phase 2). In production, "Run ETL" submits a job to a worker; locally it can call `rustyrag etl run` directly.
+
+```
+RustyRAG Studio (browser)
+  → writes YAML configs
+  → triggers ETL (batch)          Query API (long-running)
+  → chat playground ──────────────→ /v1/query/stream
+         │                                │
+         └──────── vector store ──────────┘
+```
+
+**Technology (proposed, locked for v1 planning):**
+
+| Layer | Choice | Rationale |
+|---|---|---|
+| Frontend | **React + TypeScript + Vite** | Forms, wizards, adapter dropdowns; fast iteration |
+| Components | shadcn/ui (or similar) | Accessible forms/tabs without heavy design work |
+| Backend | **`rustyrag-gui` crate (Axum)** | Reuses Rust validator + adapter registry; no duplicate logic in Node |
+| Serving | Axum serves static build + `/api/*` | Single deployable unit; fits Phase 5 Docker |
+| Playground | Browser → existing query API | Streamed chat + citations via `/v1/query/stream` |
+
+**GUI backend API (planned):**
+
+```
+GET  /api/adapters           # registry + field schema (Phase 3)
+POST /api/config/validate
+POST /api/config/export      # pipeline or RAG → YAML
+POST /api/etl/dry-run
+POST /api/etl/run            # local dev; production → job queue (Phase 5)
+```
+
+**v1 scope:**
+- Pipeline wizard + RAG config editor driven by adapter registry
+- Raw YAML toggle for power users
+- Validate, dry-run, export/save YAML
+- "Run ETL" button (local dev)
+- Basic chat playground (streamed answers + source citations)
+
+**Out of scope for v1:** separate admin app, K8s job scheduler UI, multi-user auth.
 
 **Exit criteria:** Create a new pipeline entirely in GUI → export YAML → ETL + query work.
 
@@ -383,34 +464,27 @@ context:
 
 ### Phase 6 — Advanced adapters ✅ (partial)
 
-**New adapters & features:**
+Most Phase 6 items are done — see **What is built so far → Phase 6**.
 
-| Feature | Config | CLI / API |
-|---|---|---|
-| Semantic chunking | `chunk.adapter: semantic` | Uses embed API at ingest |
-| Hybrid search | `retrieval.search_mode: hybrid` | Dense + BM25 rerank |
-| Ollama embed/LLM | `embed.adapter: ollama` / `generation.adapter: ollama` | Local, no API key |
-| PDF / HTML parse | `parse.adapter: auto` | `.pdf`, `.html`, `.htm` files |
-| Streaming query | — | `POST /v1/query/stream` (SSE) |
-| File size guard | `source.max_file_size_bytes` | Skips oversized files |
-| Chunk limit | `index.max_chunks_per_document` | Rejects runaway docs |
-| Checkpoint/resume | `index.checkpoint: true` | Saves state per document |
-| Embed cost estimate | — | `etl dry-run` prints USD estimate |
-| Adapter registry | — | `rustyrag adapters list` |
+**Remaining:**
+- S3 source adapter
+- Confluence API source
+- Dedicated reranker adapter (separate from built-in hybrid BM25)
+- SQLite checkpoint store (today: JSON per-document checkpoint)
 
-**Example — hybrid RAG config snippet:**
+**Config examples (already supported):**
 
 ```yaml
+# Hybrid retrieval
 retrieval:
   search_mode: hybrid
-  hybrid_dense_weight: 0.7   # 70% dense, 30% BM25
+  hybrid_dense_weight: 0.7
   embed_adapter: openai
   embed_model: text-embedding-3-small
 ```
 
-**Example — Ollama pipeline snippet:**
-
 ```yaml
+# Ollama pipeline
 embed:
   adapter: ollama
   model: nomic-embed-text
@@ -429,19 +503,6 @@ curl -N -X POST http://localhost:8081/v1/query/stream \
   -d '{"query":"How do I run the pipeline?"}'
 # SSE events: sources → token (×N) → done
 ```
-
----
-
-Each new adapter auto-appears in GUI via registry (`rustyrag adapters list`):
-
-- ✅ Semantic chunking (`chunk.adapter: semantic`)
-- ✅ Hybrid search (dense + BM25 rerank)
-- ✅ PDF + HTML parsing (via `parse.adapter: auto`)
-- ✅ Ollama (local embeddings + LLM)
-- ✅ ETL checkpoint/resume (per-document state save)
-- ✅ Streaming `/v1/query/stream` responses (SSE)
-- ✅ Safety: file size limits, max chunks, embed cost estimates in dry-run
-- ⏳ S3 **source**, Confluence API, dedicated reranker adapter, SQLite checkpoint store
 
 ---
 
@@ -491,7 +552,7 @@ Each new adapter auto-appears in GUI via registry (`rustyrag adapters list`):
 - [x] Phase 0 — Scaffold
 - [x] Phase 1 — ETL vertical slice
 - [x] Phase 2 — Query API
-- [ ] Phase 3 — Config schema + adapter registry for GUI
+- [~] Phase 3 — Config schema + adapter registry for GUI (**partial**: `adapters list` only)
 - [ ] Phase 4 — Web GUI
 - [ ] Phase 5 — Docker + multi-instance
 - [x] Phase 6 — Advanced adapters (partial: semantic, hybrid, Ollama, PDF/HTML, streaming, safety)
@@ -502,7 +563,7 @@ Each new adapter auto-appears in GUI via registry (`rustyrag adapters list`):
 ## Starting a new Cursor chat
 
 1. Open folder `~/coding/rustyrag`
-2. Say: *“Continue RustyRAG — see PLAN.md. Phase 6 adapters done; next is Phase 3 (GUI foundation) or Phase 5 (Docker).”*
+2. Say: *“Continue RustyRAG — see PLAN.md. Engine + Phase 6 partial done; finish Phase 3 (JSON Schema + config export) or start Phase 4/5/7.”*
 
 The repo + this file are the source of truth — not chat history.
 

@@ -1,0 +1,33 @@
+version: 1
+name: docs-index-semantic
+
+source:
+  adapter: filesystem
+  path: ./data/docs
+  glob: "**/*"
+  max_file_size_bytes: 10485760
+
+parse:
+  adapter: auto
+
+chunk:
+  adapter: semantic
+  chunk_size: 512
+  similarity_threshold: 0.5
+
+embed:
+  adapter: openai
+  model: text-embedding-3-small
+  batch_size: 64
+
+store:
+  adapter: qdrant
+  url: "${QDRANT_URL}"
+  collection: docs-semantic
+  distance: cosine
+
+index:
+  idempotency_key: content_hash
+  batch_upsert_size: 100
+  max_chunks_per_document: 10000
+  checkpoint: true

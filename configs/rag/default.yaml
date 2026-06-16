@@ -1,0 +1,22 @@
+version: 1
+name: default-rag
+
+retrieval:
+  collection: docs
+  store_url: "${QDRANT_URL}"
+  embed_model: text-embedding-3-small
+  top_k: 5
+  search_mode: semantic
+  rerank:
+    enabled: false
+    adapter: none
+
+generation:
+  adapter: openai
+  model: gpt-4o-mini
+  system_prompt: |
+    Answer using only the provided context. Cite sources when possible.
+
+context:
+  max_tokens: 4000
+  template: default

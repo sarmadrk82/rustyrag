@@ -1,0 +1,30 @@
+version: 1
+name: docs-index
+
+source:
+  adapter: filesystem
+  path: ./data/docs
+  glob: "**/*"
+
+parse:
+  adapter: auto
+
+chunk:
+  adapter: recursive
+  chunk_size: 512
+  chunk_overlap: 64
+
+embed:
+  adapter: openai
+  model: text-embedding-3-small
+  batch_size: 64
+
+store:
+  adapter: qdrant
+  url: "${QDRANT_URL}"
+  collection: docs
+  distance: cosine
+
+index:
+  idempotency_key: content_hash
+  batch_upsert_size: 100

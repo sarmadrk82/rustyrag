@@ -1,0 +1,25 @@
+[package]
+name = "rustyrag-adapters"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+glob.workspace = true
+hex.workspace = true
+qdrant-client.workspace = true
+reqwest.workspace = true
+rustyrag-config = { path = "../rustyrag-config" }
+rustyrag-core = { path = "../rustyrag-core" }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+text-splitter.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+futures-util.workspace = true
+tracing.workspace = true
+pdf-extract = { workspace = true }
+html2text = { workspace = true }
+regex.workspace = true

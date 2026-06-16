@@ -1,0 +1,41 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/rustyrag-core",
+    "crates/rustyrag-config",
+    "crates/rustyrag-adapters",
+    "crates/rustyrag-etl",
+    "crates/rustyrag-api",
+    "crates/rustyrag-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+anyhow = "1"
+async-trait = "0.1"
+clap = { version = "4", features = ["derive"] }
+hex = "0.4"
+glob = "0.3"
+qdrant-client = "1.18"
+regex = "1"
+reqwest = { version = "0.12", features = ["json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+sha2 = "0.10"
+text-splitter = { version = "0.16", features = ["markdown"] }
+thiserror = "1"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+dotenvy = "0.15"
+axum = "0.7"
+tower = "0.5"
+futures-util = "0.3"
+tokio-stream = "0.1"
+pdf-extract = "0.7"
+html2text = "0.12"
